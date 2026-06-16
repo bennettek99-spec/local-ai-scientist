@@ -20,6 +20,10 @@ from pathlib import Path
 
 import streamlit as st
 
+# set_page_config must be the FIRST Streamlit call — do it before touching
+# st.secrets so a secrets read can't trip the "first command" rule.
+st.set_page_config(page_title="Local AI Scientist", page_icon="🔬", layout="wide")
+
 # Make the project root importable when Streamlit runs this file directly.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -28,20 +32,24 @@ if str(PROJECT_ROOT) not in sys.path:
 # When deployed (e.g. Streamlit Community Cloud) there is no .env file; config
 # comes from the Streamlit "secrets" manager instead. Copy those secrets into
 # the environment BEFORE importing settings so they're picked up. No-op locally.
+# (Overwrite, so secrets always win.) SECRETS_STATUS is shown in the sidebar so
+# a deployment can self-report whether secrets actually loaded.
+SECRETS_STATUS = "no secrets (local .env)"
 try:
-    for _key, _value in st.secrets.items():
+    _items = dict(st.secrets.items())
+    for _key, _value in _items.items():
         if isinstance(_value, (str, int, float, bool)):
-            os.environ.setdefault(_key, str(_value))
-except Exception:  # noqa: BLE001 - no secrets file locally is fine
-    pass
+            os.environ[_key] = str(_value)
+    if _items:
+        SECRETS_STATUS = f"loaded {len(_items)} secret(s)"
+except Exception as _exc:  # noqa: BLE001 - no secrets file locally is fine
+    SECRETS_STATUS = f"not loaded ({type(_exc).__name__})"
 
 from config.settings import ARXIV_FIELDS, settings  # noqa: E402
 from core.pipeline import ResearchAssistant  # noqa: E402
 from utils.logging_config import configure_logging  # noqa: E402
 
 configure_logging(settings.logs_dir, level=settings.log_level)
-
-st.set_page_config(page_title="Local AI Scientist", page_icon="🔬", layout="wide")
 
 
 def check_password() -> bool:
@@ -97,6 +105,9 @@ def sidebar(assistant: ResearchAssistant) -> str:
         st.caption(f"Model: `{health['model']}`")
         st.caption(f"Papers: {health['papers_in_db']}")
         st.caption(f"Chunks: {health['chunks_in_vector_store']}")
+        st.divider()
+        st.caption(f"Secrets: {SECRETS_STATUS}")
+        st.caption(f"API key detected: {'yes' if os.environ.get('OPENAI_API_KEY') else 'no'}")
     return page
 
 
