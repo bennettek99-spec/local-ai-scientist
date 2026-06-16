@@ -1,0 +1,428 @@
+"""Streamlit interface for Local AI Scientist.
+
+Run with::
+
+    streamlit run ui/streamlit_app.py
+
+or::
+
+    python main.py ui
+
+Pages: Search Papers, Browse Library, Ask Questions, Weekly Reports,
+Knowledge Graph.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import streamlit as st
+
+# Make the project root importable when Streamlit runs this file directly.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# When deployed (e.g. Streamlit Community Cloud) there is no .env file; config
+# comes from the Streamlit "secrets" manager instead. Copy those secrets into
+# the environment BEFORE importing settings so they're picked up. No-op locally.
+try:
+    for _key, _value in st.secrets.items():
+        if isinstance(_value, (str, int, float, bool)):
+            os.environ.setdefault(_key, str(_value))
+except Exception:  # noqa: BLE001 - no secrets file locally is fine
+    pass
+
+from config.settings import ARXIV_FIELDS, settings  # noqa: E402
+from core.pipeline import ResearchAssistant  # noqa: E402
+from utils.logging_config import configure_logging  # noqa: E402
+
+configure_logging(settings.logs_dir, level=settings.log_level)
+
+st.set_page_config(page_title="Local AI Scientist", page_icon="🔬", layout="wide")
+
+
+def check_password() -> bool:
+    """Gate the app behind APP_PASSWORD when one is configured.
+
+    Set APP_PASSWORD in Streamlit secrets to protect a public deployment. If it
+    is unset (e.g. running locally), the app is open.
+    """
+    password = os.environ.get("APP_PASSWORD")
+    if not password:
+        return True
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("🔬 Local AI Scientist")
+    st.caption("This deployment is private. Enter the password to continue.")
+    entered = st.text_input("Password", type="password")
+    if entered:
+        if entered == password:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+
+@st.cache_resource(show_spinner="Initialising assistant…")
+def get_assistant() -> ResearchAssistant:
+    """Build the assistant once and reuse it across reruns."""
+    return ResearchAssistant()
+
+
+def sidebar(assistant: ResearchAssistant) -> str:
+    """Render the sidebar navigation and status panel; return the page name."""
+    st.sidebar.title("🔬 Local AI Scientist")
+    page = st.sidebar.radio(
+        "Navigate",
+        [
+            "Browse Library",
+            "Ask Questions",
+            "Live Science Assistant",
+            "bioRxiv Assistant",
+            "Weekly Reports",
+            "Knowledge Graph",
+        ],
+    )
+    st.sidebar.divider()
+    with st.sidebar.expander("System status", expanded=False):
+        health = assistant.health_check()
+        ok = health["llm_reachable"] and health["model_available"]
+        st.write("🟢 LLM ready" if ok else "🔴 LLM / model unavailable")
+        st.caption(f"Provider: `{health['provider']}`")
+        st.caption(f"Model: `{health['model']}`")
+        st.caption(f"Papers: {health['papers_in_db']}")
+        st.caption(f"Chunks: {health['chunks_in_vector_store']}")
+    return page
+
+
+# ----------------------------------------------------------------------- pages
+def _processing_progress():
+    """Build a live Streamlit progress UI for paper processing.
+
+    Returns ``(on_progress, finalize)``: pass ``on_progress`` to
+    ``process_papers``/``add_and_process`` and call ``finalize`` when done.
+    """
+    progress_bar = st.progress(0.0, text="Starting…")
+    status = st.empty()            # live, single-line current-stage indicator
+    log_area = st.container()      # one persistent line per finished paper
+
+    # Fraction of a paper complete at the start of each stage, so the bar moves
+    # smoothly *within* a paper, not just between papers.
+    stage_weight = {"downloading": 0.1, "extracting": 0.3, "summarizing": 0.55, "embedding": 0.9}
+
+    def on_progress(ev) -> None:
+        if ev.stage in ("done", "error"):
+            frac = ev.done / ev.total if ev.total else 1.0
+            icon = "✅" if ev.stage == "done" else "⚠️"
+            detail = ev.error or "summarised & embedded"
+            log_area.write(f"{icon} [{ev.done}/{ev.total}] `{ev.arxiv_id}` — {detail}")
+        else:
+            frac = (ev.done + stage_weight.get(ev.stage, 0.0)) / (ev.total or 1)
+            status.markdown(
+                f"⏳ **[{ev.done}/{ev.total}]** `{ev.arxiv_id}` — "
+                f"**{ev.stage}…** ({ev.elapsed:.0f}s) — *{ev.title[:60]}*"
+            )
+        progress_bar.progress(min(frac, 1.0), text=f"{ev.done}/{ev.total} papers done")
+
+    def finalize() -> None:
+        progress_bar.progress(1.0, text="Complete")
+        status.empty()
+
+    return on_progress, finalize
+
+
+def page_library(assistant: ResearchAssistant) -> None:
+    st.header("Browse Library")
+    counts = assistant.db.field_counts()
+    if counts:
+        st.caption(" · ".join(f"{k}: {v}" for k, v in counts.items()))
+
+    present = [f for f in counts if f != "Uncategorised"]
+    field_options = ["All"] + sorted(set(list(ARXIV_FIELDS.keys()) + present))
+    field = st.selectbox("Filter by field", field_options)
+    papers = assistant.db.list_papers(field=None if field == "All" else field)
+
+    if not papers:
+        st.info(
+            "No papers yet. Use the **Live Science Assistant** or **bioRxiv "
+            "Assistant** tabs to find papers and add them to your library."
+        )
+        return
+
+    st.write(f"**{len(papers)} papers**")
+    for paper in papers:
+        status = "✅" if paper.summarized else "⏳"
+        with st.expander(f"{status} [{paper.arxiv_id}] {paper.title}"):
+            st.caption(
+                f"{', '.join(paper.authors[:8])} · {paper.primary_category} "
+                f"· {paper.published.date()}"
+            )
+            if paper.entry_url:
+                st.markdown(f"[View on arXiv]({paper.entry_url})")
+            analysis = assistant.db.get_analysis(paper.arxiv_id)
+            if analysis:
+                st.markdown(analysis.to_markdown())
+            else:
+                st.write(paper.abstract)
+                st.caption("Not yet summarised.")
+
+
+def page_questions(assistant: ResearchAssistant) -> None:
+    st.header("Ask Questions")
+    st.caption("Retrieval-augmented Q&A grounded in your paper collection.")
+
+    field = st.selectbox(
+        "Limit to a field (optional)", ["All"] + list(ARXIV_FIELDS.keys())
+    )
+    examples = [
+        "What new papers discuss Denisovan DNA?",
+        "Show recent work on high-entropy alloys.",
+        "Find connections between paleogenetics and machine learning.",
+    ]
+    st.caption("Try: " + " · ".join(f"_{e}_" for e in examples))
+
+    # A form so pressing Enter (not just clicking) submits the question.
+    with st.form("ask_form"):
+        question = st.text_input("Your question", "")
+        submitted = st.form_submit_button("Ask", type="primary")
+
+    if submitted and question.strip():
+        with st.spinner("Searching your library and reasoning over the papers…"):
+            try:
+                answer = assistant.ask(question, field=None if field == "All" else field)
+            except Exception as exc:  # noqa: BLE001 - surface any backend error
+                st.error(f"Question failed: {exc}")
+                return
+        if answer.answer.strip():
+            st.markdown(answer.answer)
+        else:
+            st.warning(
+                "The model returned an empty answer — it may be rate-limited. "
+                "Check the provider in the sidebar status, or try again shortly."
+            )
+        if answer.sources:
+            with st.expander("Sources / retrieved passages"):
+                for src in answer.sources:
+                    meta = src["metadata"]
+                    st.markdown(f"**[{meta.get('arxiv_id')}]** {meta.get('title', '')}")
+                    st.caption(src["text"][:400] + "…")
+    elif submitted:
+        st.info("Type a question first.")
+
+
+def page_live(assistant: ResearchAssistant) -> None:
+    st.header("Live Science Assistant")
+    st.caption(
+        "Ask anything — this searches arXiv **live** for each question and answers "
+        "from fresh results, even papers not yet in your library."
+    )
+    st.caption(
+        "Try: _What are the latest methods for ancient DNA contamination removal?_ · "
+        "_Recent breakthroughs in high-entropy alloy design_"
+    )
+
+    with st.form("live_form"):
+        question = st.text_input("Your question", "")
+        max_results = st.slider("arXiv results to consider", 3, 12, 6)
+        submitted = st.form_submit_button("Search arXiv & Answer", type="primary")
+
+    if submitted and question.strip():
+        with st.spinner("Searching arXiv live and reasoning over fresh results…"):
+            try:
+                result = assistant.live_assistant(
+                    question, max_results=int(max_results)
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Live query failed: {exc}")
+                return
+        # Persist across reruns so the "Add to library" button keeps the results.
+        st.session_state["live_result"] = result
+    elif submitted:
+        st.info("Type a question first.")
+
+    result = st.session_state.get("live_result")
+    if result is None:
+        return
+
+    st.caption(f"arXiv query used: `{result.arxiv_query}`")
+    if result.answer.strip():
+        st.markdown(result.answer)
+    else:
+        st.warning("The model returned an empty answer — try again or rephrase.")
+
+    if result.papers:
+        st.subheader(f"{len(result.papers)} papers from arXiv")
+        st.caption("Ranked by **relevance** to your question (not by date — note the mixed years).")
+        st.caption(
+            "Adding downloads each PDF and summarises it (~10–20s/paper on cloud), "
+            "then it's browsable and searchable in Ask Questions."
+        )
+        if st.button("➕ Add & process these papers", type="primary"):
+            on_progress, finalize = _processing_progress()
+            with st.spinner("Adding & processing papers…"):
+                results = assistant.add_and_process(
+                    result.papers, progress_callback=on_progress
+                )
+            finalize()
+            ok = sum(1 for r in results if r.summarized)
+            st.success(
+                f"Added & processed {len(results)} papers ({ok} summarised). "
+                "Find them in Browse Library and Ask Questions."
+            )
+        for paper in result.papers:
+            with st.expander(f"[{paper.arxiv_id}] {paper.title}"):
+                st.caption(
+                    f"{', '.join(paper.authors[:6])} · {paper.primary_category} "
+                    f"· {paper.published.date()}"
+                )
+                if paper.entry_url:
+                    st.markdown(f"[View on arXiv]({paper.entry_url})")
+                st.write(paper.abstract)
+
+
+def page_biorxiv(assistant: ResearchAssistant) -> None:
+    st.header("bioRxiv Assistant")
+    st.caption(
+        "Searches **bioRxiv preprints** live (via Europe PMC) for each question — "
+        "much richer than arXiv for biology, genetics, and paleogenetics."
+    )
+    st.caption(
+        "Try: _What does recent work say about Neanderthal introgression and immunity?_ · "
+        "_Methods for authenticating ancient DNA_"
+    )
+    st.info("bioRxiv papers are **preprints** — not yet peer-reviewed.", icon="🧬")
+
+    with st.form("biorxiv_form"):
+        question = st.text_input("Your question", "")
+        max_results = st.slider("bioRxiv results to consider", 3, 12, 6)
+        submitted = st.form_submit_button("Search bioRxiv & Answer", type="primary")
+
+    if submitted and question.strip():
+        with st.spinner("Searching bioRxiv live and reasoning over fresh preprints…"):
+            try:
+                result = assistant.biorxiv_assistant(
+                    question, max_results=int(max_results)
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"bioRxiv query failed: {exc}")
+                return
+        st.session_state["biorxiv_result"] = result
+    elif submitted:
+        st.info("Type a question first.")
+
+    result = st.session_state.get("biorxiv_result")
+    if result is None:
+        return
+
+    st.caption(f"bioRxiv query used: `{result.query}`")
+    if result.answer.strip():
+        st.markdown(result.answer)
+    else:
+        st.warning("The model returned an empty answer — try again or rephrase.")
+
+    if result.papers:
+        st.subheader(f"{len(result.papers)} preprints from bioRxiv")
+        st.caption("Ranked by **relevance** to your question.")
+        st.caption("Adding summarises & indexes each preprint from its abstract.")
+        if st.button("➕ Add & summarise these preprints", type="primary"):
+            with st.spinner("Summarising & indexing preprints…"):
+                added = assistant.add_biorxiv_papers(result.papers)
+            st.success(
+                f"Added {added} preprints to your library (field: bioRxiv). "
+                "Find them in Browse Library and Ask Questions."
+            )
+        for paper in result.papers:
+            with st.expander(f"{paper.title}"):
+                st.caption(
+                    f"{', '.join(paper.authors[:6])} · {paper.published}"
+                )
+                if paper.url:
+                    st.markdown(f"[View on bioRxiv / DOI]({paper.url})  ·  `{paper.doi}`")
+                st.write(paper.abstract[:1500] + ("…" if len(paper.abstract) > 1500 else ""))
+
+
+def page_reports(assistant: ResearchAssistant) -> None:
+    st.header("Weekly Reports")
+    days = st.number_input("Look-back window (days)", 1, 60, settings.search_lookback_days)
+    st.caption(
+        "Synthesises your *summarised* papers (capped to keep the request under "
+        "provider rate limits)."
+    )
+    if st.button("Generate new report", type="primary"):
+        with st.spinner("Synthesising weekly report…"):
+            try:
+                report = assistant.generate_report(days=int(days))
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Report generation failed: {exc}")
+                return
+        st.markdown(report)
+
+    st.divider()
+    st.subheader("Saved reports")
+    from agents.report_agent import ReportAgent
+
+    saved = ReportAgent.list_reports()
+    if not saved:
+        st.info("No saved reports yet.")
+        return
+    chosen = st.selectbox("Open a saved report", saved)
+    if chosen:
+        st.markdown((settings.reports_dir / chosen).read_text(encoding="utf-8"))
+
+
+def page_graph(assistant: ResearchAssistant) -> None:
+    st.header("Knowledge Graph")
+    st.caption("Relationships among papers, authors, topics, and fields.")
+
+    field = st.selectbox(
+        "Limit to a field (optional)", ["All"] + list(ARXIV_FIELDS.keys())
+    )
+    if st.button("Build / refresh graph", type="primary"):
+        with st.spinner("Building knowledge graph…"):
+            builder = assistant.build_graph(
+                field=None if field == "All" else field, export_html=True
+            )
+        st.session_state["graph_built"] = True
+
+        stats = builder.stats()
+        cols = st.columns(len(stats))
+        for col, (key, value) in zip(cols, stats.items()):
+            col.metric(key, value)
+
+        st.subheader("Most central topics")
+        for label, degree in builder.central_topics():
+            st.write(f"- **{label}** — {degree} connections")
+
+    # Show the interactive pyvis HTML if it was generated.
+    html_path = settings.data_dir / "knowledge_graph.html"
+    if html_path.exists():
+        st.subheader("Interactive view")
+        st.components.v1.html(html_path.read_text(encoding="utf-8"), height=750)
+    else:
+        st.info("Build the graph to generate an interactive visualisation.")
+
+
+PAGES = {
+    "Browse Library": page_library,
+    "Ask Questions": page_questions,
+    "Live Science Assistant": page_live,
+    "bioRxiv Assistant": page_biorxiv,
+    "Weekly Reports": page_reports,
+    "Knowledge Graph": page_graph,
+}
+
+
+def main() -> None:
+    if not check_password():
+        return
+    assistant = get_assistant()
+    page = sidebar(assistant)
+    PAGES[page](assistant)
+
+
+main()

@@ -1,0 +1,31 @@
+# Environment / secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# App data (generated locally)
+data/papers/*
+data/embeddings/*
+data/reports/*
+data/*.sqlite3
+data/*.graphml
+data/*.html
+logs/*
+
+# Keep the directory structure
+!data/papers/.gitkeep
+!data/embeddings/.gitkeep
+!data/reports/.gitkeep
+!logs/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

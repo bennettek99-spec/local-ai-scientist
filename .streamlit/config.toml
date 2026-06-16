@@ -1,0 +1,9 @@
+# Streamlit configuration (committed). Secrets go in secrets.toml (NOT committed)
+# or the Streamlit Community Cloud "Secrets" manager.
+
+[theme]
+primaryColor = "#4C9BE8"
+base = "light"
+
+[browser]
+gatherUsageStats = false
