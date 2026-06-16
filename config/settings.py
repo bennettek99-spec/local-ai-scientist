@@ -82,7 +82,7 @@ class Settings(BaseSettings):
         default="", description="API key for the OpenAI-compatible provider."
     )
     openai_model: str = Field(
-        default="llama-3.3-70b-versatile",
+        default="openai/gpt-oss-120b",
         description="Model id on the OpenAI-compatible provider.",
     )
 

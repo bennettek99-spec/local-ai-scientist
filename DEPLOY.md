@@ -43,7 +43,7 @@ git push -u origin main
    LLM_PROVIDER = "groq"
    OPENAI_BASE_URL = "https://api.groq.com/openai/v1"
    OPENAI_API_KEY = "gsk_your_groq_key_here"
-   OPENAI_MODEL = "llama-3.3-70b-versatile"
+   OPENAI_MODEL = "openai/gpt-oss-120b"
    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
    ```
 
