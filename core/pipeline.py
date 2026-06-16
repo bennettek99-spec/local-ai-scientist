@@ -25,6 +25,7 @@ from typing import Callable
 
 from agents.biorxiv_agent import BioAnswer, BioPaper, BioRxivAssistant
 from agents.live_agent import LiveAnswer, LiveScienceAssistant
+from agents.ntrs_agent import NtrsAnswer, NtrsAssistant, NtrsPaper
 from agents.question_agent import Answer, QuestionAgent
 from agents.report_agent import ReportAgent
 from agents.search_agent import SearchAgent
@@ -96,6 +97,7 @@ class ResearchAssistant:
             search_agent=self.search_agent, client=self.llm
         )
         self.biorxiv_agent = BioRxivAssistant(client=self.llm)
+        self.ntrs_agent = NtrsAssistant(client=self.llm)
         self.graph_builder = KnowledgeGraphBuilder(database=self.db)
 
     # ------------------------------------------------------------- diagnostics
@@ -308,6 +310,10 @@ class ResearchAssistant:
         """Answer a question with a fresh live bioRxiv preprint search."""
         return self.biorxiv_agent.answer(question, max_results=max_results)
 
+    def ntrs_assistant(self, question: str, max_results: int = 6) -> NtrsAnswer:
+        """Answer a question with a fresh live NASA NTRS search."""
+        return self.ntrs_agent.answer(question, max_results=max_results)
+
     def save_papers(self, papers: list[Paper]) -> int:
         """Store a list of papers' metadata in the library; return new count."""
         new = 0
@@ -362,6 +368,33 @@ class ResearchAssistant:
                     self.db.mark_embedded(bp.doi, True)
             added += 1
         logger.info("Added %d bioRxiv papers to library", added)
+        return added
+
+    def add_ntrs_papers(self, ntrs_papers: list[NtrsPaper]) -> int:
+        """Add NASA NTRS reports to the library (summarise + embed from abstract)."""
+        added = 0
+        for rp in ntrs_papers:
+            if not rp.id or self.db.exists(rp.id):
+                continue
+            paper = Paper(
+                arxiv_id=rp.id,
+                title=rp.title,
+                authors=rp.authors,
+                abstract=rp.abstract,
+                primary_category=rp.sti_type or "NTRS",
+                field="NTRS",
+                published=_parse_date(rp.published),
+                entry_url=rp.url,
+            )
+            self.db.upsert_paper(paper)
+            if rp.abstract:
+                analysis = self.summary_agent.analyze(paper, rp.abstract)
+                if not analysis.is_empty:
+                    self.db.save_analysis(rp.id, analysis)
+                if self.vector_store.add_paper(paper, rp.abstract):
+                    self.db.mark_embedded(rp.id, True)
+            added += 1
+        logger.info("Added %d NTRS papers to library", added)
         return added
 
     def remove_papers_by_field(self, field: str) -> int:

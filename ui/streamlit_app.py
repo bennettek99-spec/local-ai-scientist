@@ -92,6 +92,7 @@ FIELD_COLORS = {
     "Paleoanthropology": "#F59E0B",
     "Artificial Intelligence": "#EC4899",
     "bioRxiv": "#8B5CF6",
+    "NTRS": "#E03C31",
 }
 
 
@@ -519,6 +520,65 @@ def page_biorxiv(assistant: ResearchAssistant) -> None:
                 st.write(paper.abstract[:1500] + ("…" if len(paper.abstract) > 1500 else ""))
 
 
+def page_ntrs(assistant: ResearchAssistant) -> None:
+    page_header("🚀", "NASA NTRS", "Live search of NASA technical reports")
+    st.caption(
+        "Searches the **NASA Technical Reports Server** live — strong on aerospace, "
+        "planetary science, astrophysics, propulsion, and materials."
+    )
+    st.caption(
+        "Try: _thermal performance of the Mars rover_ · "
+        "_high-entropy alloys for turbine applications_"
+    )
+
+    with st.form("ntrs_form"):
+        question = st.text_input("Your question", "")
+        max_results = st.slider("NTRS results to consider", 3, 12, 6)
+        submitted = st.form_submit_button("Search NTRS & Answer", type="primary")
+
+    if submitted and question.strip():
+        with st.spinner("Searching NASA NTRS live and reasoning over reports…"):
+            try:
+                result = assistant.ntrs_assistant(question, max_results=int(max_results))
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"NTRS query failed: {exc}")
+                return
+        st.session_state["ntrs_result"] = result
+    elif submitted:
+        st.info("Type a question first.")
+
+    result = st.session_state.get("ntrs_result")
+    if result is None:
+        return
+
+    st.caption(f"NTRS query used: `{result.query}`")
+    if result.answer.strip():
+        st.markdown(result.answer)
+    else:
+        st.warning("The model returned an empty answer — try again or rephrase.")
+
+    if result.papers:
+        st.subheader(f"{len(result.papers)} reports from NASA NTRS")
+        st.caption("Ranked by **relevance** to your question.")
+        st.caption("Adding summarises & indexes each report from its abstract.")
+        if st.button("➕ Add & summarise these reports", type="primary"):
+            with st.spinner("Summarising & indexing reports…"):
+                added = assistant.add_ntrs_papers(result.papers)
+            st.success(
+                f"Added {added} reports to your library (field: NTRS). "
+                "Find them in Browse Library and Ask Questions."
+            )
+        for paper in result.papers:
+            with st.expander(f"{paper.title}"):
+                meta = f"{', '.join(paper.authors[:6])} · {paper.published}"
+                if paper.center:
+                    meta += f" · {paper.center}"
+                st.caption(meta)
+                if paper.url:
+                    st.markdown(f"[View on NTRS]({paper.url})  ·  `{paper.id}`")
+                st.write(paper.abstract[:1500] + ("…" if len(paper.abstract) > 1500 else ""))
+
+
 def page_reports(assistant: ResearchAssistant) -> None:
     page_header("📰", "Weekly Reports", "AI-synthesised digests of your recent papers")
     days = st.number_input("Look-back window (days)", 1, 60, settings.search_lookback_days)
@@ -584,6 +644,7 @@ PAGES = {
     "💬  Ask": page_questions,
     "🔭  Live arXiv": page_live,
     "🧬  bioRxiv": page_biorxiv,
+    "🚀  NASA NTRS": page_ntrs,
     "📰  Reports": page_reports,
     "🕸️  Graph": page_graph,
 }
