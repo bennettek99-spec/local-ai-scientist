@@ -82,30 +82,169 @@ def get_assistant() -> ResearchAssistant:
     return ResearchAssistant()
 
 
+# Colour accents per research field, used for badges/cards.
+FIELD_COLORS = {
+    "Physics": "#3B82F6",
+    "Astrophysics": "#6366F1",
+    "Materials Science": "#0EA5E9",
+    "Genetics": "#10B981",
+    "Paleogenetics": "#14B8A6",
+    "Paleoanthropology": "#F59E0B",
+    "Artificial Intelligence": "#EC4899",
+    "bioRxiv": "#8B5CF6",
+}
+
+
+def _field_color(field: str) -> str:
+    return FIELD_COLORS.get(field, "#64748B")
+
+
+def chip(text: str, color: str = "#64748B", solid: bool = False) -> str:
+    """Return HTML for a small rounded pill/badge."""
+    if solid:
+        style = f"background:{color};color:#fff;"
+    else:
+        style = f"background:{color}1A;color:{color};border:1px solid {color}33;"
+    return (
+        f"<span style='display:inline-block;padding:2px 10px;border-radius:999px;"
+        f"font-size:0.72rem;font-weight:600;line-height:1.4;{style}'>{text}</span>"
+    )
+
+
+def page_header(icon: str, title: str, subtitle: str = "") -> None:
+    """Render a consistent, modern page header."""
+    sub = f"<div class='page-sub'>{subtitle}</div>" if subtitle else ""
+    st.markdown(
+        f"<div class='page-head'><div class='page-icon'>{icon}</div>"
+        f"<div><div class='page-title'>{title}</div>{sub}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def inject_theme() -> None:
+    """Inject the custom stylesheet (fonts, colours, cards, buttons)."""
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap');
+
+        :root {
+            --primary:#6366F1; --primary2:#8B5CF6; --accent:#0EA5E9;
+            --bg:#F5F7FB; --card:#FFFFFF; --border:#E7EAF3;
+            --ink:#0F172A; --muted:#64748B;
+        }
+
+        .stApp { background:
+            radial-gradient(1200px 500px at 100% -10%, #EAE9FE 0%, rgba(234,233,254,0) 55%),
+            linear-gradient(180deg, #F7F8FC 0%, #F2F4FA 100%); }
+        html, body, [class*="css"], .stMarkdown, p, li, label, input, textarea {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--ink);
+        }
+        h1,h2,h3,h4 { font-family:'Sora','Inter',sans-serif; letter-spacing:-0.02em; }
+        .block-container { padding-top: 2.2rem; max-width: 1120px; }
+        #MainMenu, footer, [data-testid="stDecoration"] { visibility: hidden; }
+
+        /* ---- Page header ---- */
+        .page-head { display:flex; align-items:center; gap:14px; margin:0 0 1.1rem; }
+        .page-icon { font-size:1.6rem; width:50px; height:50px; display:flex;
+            align-items:center; justify-content:center; border-radius:14px;
+            background:linear-gradient(135deg, var(--primary), var(--primary2));
+            box-shadow:0 8px 20px -8px var(--primary); }
+        .page-title { font-family:'Sora',sans-serif; font-size:1.7rem; font-weight:700;
+            color:var(--ink); line-height:1.1; }
+        .page-sub { color:var(--muted); font-size:0.92rem; margin-top:2px; }
+
+        /* ---- Sidebar ---- */
+        [data-testid="stSidebar"] {
+            background:linear-gradient(185deg,#141B2E 0%, #0C1120 100%);
+            border-right:1px solid rgba(255,255,255,.06); }
+        [data-testid="stSidebar"] * { color:#C7D0E0; }
+        [data-testid="stSidebar"] h1 { color:#fff; font-size:1.25rem; }
+        /* nav radio as menu */
+        [data-testid="stSidebar"] [role="radiogroup"] label {
+            padding:9px 12px; border-radius:10px; margin:2px 0; transition:all .12s ease;
+            border:1px solid transparent; }
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover {
+            background:rgba(255,255,255,.06); }
+        [data-testid="stSidebar"] [role="radiogroup"] label p {
+            font-weight:600; font-size:0.95rem; }
+
+        /* ---- Buttons ---- */
+        .stButton > button {
+            border-radius:11px; border:1px solid var(--border); font-weight:600;
+            padding:.5rem 1rem; transition:all .15s ease; }
+        .stButton > button:hover { border-color:var(--primary); color:var(--primary); }
+        .stButton > button[kind="primary"] {
+            background:linear-gradient(135deg,var(--primary),var(--primary2));
+            color:#fff; border:none; box-shadow:0 10px 22px -10px var(--primary); }
+        .stButton > button[kind="primary"]:hover {
+            filter:brightness(1.07); transform:translateY(-1px); color:#fff; }
+
+        /* ---- Inputs ---- */
+        .stTextInput input, .stNumberInput input, textarea,
+        [data-baseweb="select"] > div { border-radius:11px !important; }
+
+        /* ---- Cards (expanders + bordered containers) ---- */
+        [data-testid="stExpander"] { border:1px solid var(--border); border-radius:16px;
+            background:var(--card); box-shadow:0 1px 3px rgba(16,24,40,.05);
+            margin-bottom:.55rem; overflow:hidden; }
+        [data-testid="stExpander"] summary:hover { color:var(--primary); }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius:18px !important; border-color:var(--border) !important;
+            box-shadow:0 2px 10px rgba(16,24,40,.05); }
+
+        /* ---- Metrics ---- */
+        [data-testid="stMetric"] { background:var(--card); border:1px solid var(--border);
+            border-radius:16px; padding:1rem 1.1rem; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+
+        /* ---- Cards used in the library grid ---- */
+        .lib-card { background:var(--card); border:1px solid var(--border);
+            border-radius:16px; padding:14px 16px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+        .lib-title { font-weight:700; font-size:0.98rem; line-height:1.3; color:var(--ink);
+            margin-bottom:6px; }
+        .lib-meta { color:var(--muted); font-size:0.8rem; margin-bottom:8px; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def sidebar(assistant: ResearchAssistant) -> str:
     """Render the sidebar navigation and status panel; return the page name."""
-    st.sidebar.title("🔬 Local AI Scientist")
-    page = st.sidebar.radio(
-        "Navigate",
-        [
-            "Browse Library",
-            "Ask Questions",
-            "Live Science Assistant",
-            "bioRxiv Assistant",
-            "Weekly Reports",
-            "Knowledge Graph",
-        ],
+    st.sidebar.markdown(
+        "<div style='display:flex;align-items:center;gap:10px;margin:.2rem 0 .2rem;'>"
+        "<div style='font-size:1.5rem;width:42px;height:42px;display:flex;align-items:center;"
+        "justify-content:center;border-radius:12px;"
+        "background:linear-gradient(135deg,#6366F1,#8B5CF6);'>🔬</div>"
+        "<div><div style='font-family:Sora,sans-serif;font-weight:700;font-size:1.05rem;"
+        "color:#fff;line-height:1.1;'>Local AI Scientist</div>"
+        "<div style='font-size:.72rem;color:#8B96AE;'>your research, on tap</div></div></div>",
+        unsafe_allow_html=True,
     )
     st.sidebar.divider()
-    with st.sidebar.expander("System status", expanded=False):
-        health = assistant.health_check()
-        ok = health["llm_reachable"] and health["model_available"]
-        st.write("🟢 LLM ready" if ok else "🔴 LLM / model unavailable")
-        st.caption(f"Provider: `{health['provider']}`")
-        st.caption(f"Model: `{health['model']}`")
-        st.caption(f"Papers: {health['papers_in_db']}")
-        st.caption(f"Chunks: {health['chunks_in_vector_store']}")
-        st.divider()
+    page = st.sidebar.radio(
+        "Navigate",
+        list(PAGES.keys()),
+        label_visibility="collapsed",
+    )
+    st.sidebar.divider()
+
+    health = assistant.health_check()
+    ok = health["llm_reachable"] and health["model_available"]
+    dot = "#22C55E" if ok else "#EF4444"
+    st.sidebar.markdown(
+        f"<div style='display:flex;align-items:center;gap:8px;font-size:.85rem;'>"
+        f"<span style='width:9px;height:9px;border-radius:50%;background:{dot};"
+        f"box-shadow:0 0 8px {dot};'></span>"
+        f"<span>{'LLM ready' if ok else 'LLM unavailable'}</span></div>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.caption(f"`{health['provider']}` · `{health['model']}`")
+    c1, c2 = st.sidebar.columns(2)
+    c1.metric("Papers", health["papers_in_db"])
+    c2.metric("Chunks", health["chunks_in_vector_store"])
+    with st.sidebar.expander("Diagnostics"):
         st.caption(f"Secrets: {SECRETS_STATUS}")
         st.caption(f"API key detected: {'yes' if os.environ.get('OPENAI_API_KEY') else 'no'}")
     return page
@@ -148,44 +287,71 @@ def _processing_progress():
 
 
 def page_library(assistant: ResearchAssistant) -> None:
-    st.header("Browse Library")
     counts = assistant.db.field_counts()
-    if counts:
-        st.caption(" · ".join(f"{k}: {v}" for k, v in counts.items()))
+    total = sum(counts.values())
+    page_header("📚", "Library", f"{total} papers in your collection")
 
     present = [f for f in counts if f != "Uncategorised"]
     field_options = ["All"] + sorted(set(list(ARXIV_FIELDS.keys()) + present))
-    field = st.selectbox("Filter by field", field_options)
+    col_a, col_b = st.columns([2, 3])
+    field = col_a.selectbox("Filter by field", field_options, label_visibility="collapsed")
+    query = col_b.text_input(
+        "search", placeholder="🔍  Filter by title or author…", label_visibility="collapsed"
+    )
+
     papers = assistant.db.list_papers(field=None if field == "All" else field)
+    if query:
+        q = query.lower()
+        papers = [
+            p for p in papers
+            if q in p.title.lower() or any(q in a.lower() for a in p.authors)
+        ]
 
     if not papers:
         st.info(
-            "No papers yet. Use the **Live Science Assistant** or **bioRxiv "
-            "Assistant** tabs to find papers and add them to your library."
+            "No papers match. Use the **🔭 Live arXiv** or **🧬 bioRxiv** tabs to "
+            "find papers and add them to your library."
         )
         return
 
-    st.write(f"**{len(papers)} papers**")
-    for paper in papers:
-        status = "✅" if paper.summarized else "⏳"
-        with st.expander(f"{status} [{paper.arxiv_id}] {paper.title}"):
-            st.caption(
-                f"{', '.join(paper.authors[:8])} · {paper.primary_category} "
-                f"· {paper.published.date()}"
-            )
-            if paper.entry_url:
-                st.markdown(f"[View on arXiv]({paper.entry_url})")
-            analysis = assistant.db.get_analysis(paper.arxiv_id)
-            if analysis:
-                st.markdown(analysis.to_markdown())
-            else:
-                st.write(paper.abstract)
-                st.caption("Not yet summarised.")
+    # Field-count chips
+    chips_html = " ".join(
+        chip(f"{k} · {v}", _field_color(k)) for k, v in sorted(counts.items(), key=lambda x: -x[1])
+    )
+    st.markdown(chips_html, unsafe_allow_html=True)
+    st.write("")
+
+    # Two-column card grid.
+    cols = st.columns(2)
+    for i, paper in enumerate(papers):
+        with cols[i % 2]:
+            with st.container(border=True):
+                status = (
+                    chip("✓ summarised", "#22C55E") if paper.summarized
+                    else chip("⏳ pending", "#F59E0B")
+                )
+                badge = chip(paper.field or "Uncategorised", _field_color(paper.field))
+                authors = ", ".join(paper.authors[:3]) + (" et al." if len(paper.authors) > 3 else "")
+                year = paper.published.year if paper.published else ""
+                st.markdown(
+                    f"<div class='lib-title'>{paper.title}</div>"
+                    f"<div class='lib-meta'>{authors} · {year}</div>"
+                    f"{badge}&nbsp;{status}",
+                    unsafe_allow_html=True,
+                )
+                with st.expander("Details"):
+                    if paper.entry_url:
+                        st.markdown(f"[🔗 View source]({paper.entry_url})")
+                    analysis = assistant.db.get_analysis(paper.arxiv_id)
+                    if analysis:
+                        st.markdown(analysis.to_markdown())
+                    else:
+                        st.write(paper.abstract)
+                        st.caption("Not yet summarised.")
 
 
 def page_questions(assistant: ResearchAssistant) -> None:
-    st.header("Ask Questions")
-    st.caption("Retrieval-augmented Q&A grounded in your paper collection.")
+    page_header("💬", "Ask Your Library", "Retrieval-augmented answers from your saved papers")
 
     field = st.selectbox(
         "Limit to a field (optional)", ["All"] + list(ARXIV_FIELDS.keys())
@@ -227,14 +393,10 @@ def page_questions(assistant: ResearchAssistant) -> None:
 
 
 def page_live(assistant: ResearchAssistant) -> None:
-    st.header("Live Science Assistant")
+    page_header("🔭", "Live arXiv Assistant", "Searches arXiv live for every question")
     st.caption(
-        "Ask anything — this searches arXiv **live** for each question and answers "
-        "from fresh results, even papers not yet in your library."
-    )
-    st.caption(
-        "Try: _What are the latest methods for ancient DNA contamination removal?_ · "
-        "_Recent breakthroughs in high-entropy alloy design_"
+        "Answers from fresh results, even papers not in your library. "
+        "Try: _ancient DNA contamination removal methods_ · _high-entropy alloy design_"
     )
 
     with st.form("live_form"):
@@ -297,10 +459,10 @@ def page_live(assistant: ResearchAssistant) -> None:
 
 
 def page_biorxiv(assistant: ResearchAssistant) -> None:
-    st.header("bioRxiv Assistant")
+    page_header("🧬", "bioRxiv Assistant", "Live preprint search for biology & genetics")
     st.caption(
-        "Searches **bioRxiv preprints** live (via Europe PMC) for each question — "
-        "much richer than arXiv for biology, genetics, and paleogenetics."
+        "Searches **bioRxiv preprints** live (via Europe PMC) — much richer than "
+        "arXiv for biology, genetics, and paleogenetics."
     )
     st.caption(
         "Try: _What does recent work say about Neanderthal introgression and immunity?_ · "
@@ -358,7 +520,7 @@ def page_biorxiv(assistant: ResearchAssistant) -> None:
 
 
 def page_reports(assistant: ResearchAssistant) -> None:
-    st.header("Weekly Reports")
+    page_header("📰", "Weekly Reports", "AI-synthesised digests of your recent papers")
     days = st.number_input("Look-back window (days)", 1, 60, settings.search_lookback_days)
     st.caption(
         "Synthesises your *summarised* papers (capped to keep the request under "
@@ -387,8 +549,7 @@ def page_reports(assistant: ResearchAssistant) -> None:
 
 
 def page_graph(assistant: ResearchAssistant) -> None:
-    st.header("Knowledge Graph")
-    st.caption("Relationships among papers, authors, topics, and fields.")
+    page_header("🕸️", "Knowledge Graph", "How your papers, authors, and topics connect")
 
     field = st.selectbox(
         "Limit to a field (optional)", ["All"] + list(ARXIV_FIELDS.keys())
@@ -419,16 +580,17 @@ def page_graph(assistant: ResearchAssistant) -> None:
 
 
 PAGES = {
-    "Browse Library": page_library,
-    "Ask Questions": page_questions,
-    "Live Science Assistant": page_live,
-    "bioRxiv Assistant": page_biorxiv,
-    "Weekly Reports": page_reports,
-    "Knowledge Graph": page_graph,
+    "📚  Library": page_library,
+    "💬  Ask": page_questions,
+    "🔭  Live arXiv": page_live,
+    "🧬  bioRxiv": page_biorxiv,
+    "📰  Reports": page_reports,
+    "🕸️  Graph": page_graph,
 }
 
 
 def main() -> None:
+    inject_theme()
     if not check_password():
         return
     assistant = get_assistant()
