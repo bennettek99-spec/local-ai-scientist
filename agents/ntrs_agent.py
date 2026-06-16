@@ -27,20 +27,23 @@ _QUERY_SYSTEM = (
 )
 
 _QUERY_PROMPT = """\
-Produce TWO NTRS keyword search queries, precise to broad, so we can fall back
-if the precise one finds nothing:
-- "precise": 3-5 of the most specific technical terms / the core phrase.
-- "broad": 2-3 core keywords for maximum recall.
+Produce TWO NTRS keyword queries for the question:
+- "precise": the core subject with any ACRONYMS EXPANDED to their full names
+  (e.g. "HLS" -> "Human Landing System", "TPS" -> "thermal protection system").
+  Keep it SHORT — the key noun phrase plus at most one qualifier. Do NOT pile on
+  extra descriptive terms; that over-narrows and hurts results.
+- "broad": just the single most central term or expanded acronym.
 
-Use ONLY substantive technical terms (systems, phenomena, missions, materials).
 NEVER include filler words like recent, latest, new, advances, review, study,
 paper, work — they wreck relevance.
 
 Examples:
-Q: thermal performance of the Mars rover on the surface
--> {{"precise": "Mars rover thermal performance surface operations", "broad": "Mars rover thermal"}}
-Q: high-entropy alloys for turbine applications
--> {{"precise": "high-entropy alloy turbine high temperature", "broad": "high-entropy alloy"}}
+Q: Artemis HLS
+-> {{"precise": "Artemis Human Landing System", "broad": "Human Landing System"}}
+Q: thermal protection for reentry vehicles
+-> {{"precise": "thermal protection system reentry", "broad": "thermal protection system"}}
+Q: high-entropy alloys for turbines
+-> {{"precise": "high-entropy alloy turbine", "broad": "high-entropy alloy"}}
 
 Return JSON exactly as: {{"precise": "...", "broad": "..."}}
 
@@ -77,6 +80,7 @@ class NtrsPaper:
     url: str
     center: str = ""
     sti_type: str = ""
+    score: float = 0.0
 
 
 @dataclass
@@ -149,6 +153,7 @@ class NtrsAssistant:
                     url=f"https://ntrs.nasa.gov/citations/{pid}",
                     center=center_name,
                     sti_type=res.get("stiType", ""),
+                    score=float(res.get("_meta", {}).get("score", 0.0)),
                 )
             )
         return papers
@@ -167,15 +172,24 @@ class NtrsAssistant:
         return "\n\n---\n\n".join(blocks)
 
     def answer(self, question: str, max_results: int = 6) -> NtrsAnswer:
-        """Search NTRS live for ``question`` and answer from the results."""
+        """Search NTRS live for ``question`` and answer from the results.
+
+        Runs every query variant (expanded, broad, and the raw question), then
+        merges the hits and keeps the best by NTRS relevance score — so an
+        over-narrow variant can't crowd out better matches.
+        """
         candidates = self.build_queries(question)
-        papers: list[NtrsPaper] = []
-        used_query = candidates[0]
+        # Fetch a few extra per query so the merge has room to rank.
+        fetch_n = max(max_results * 2, 10)
+        merged: dict[str, NtrsPaper] = {}
         for candidate in candidates:
-            papers = self._search(candidate, max_results=max_results)
-            used_query = candidate
-            if papers:
-                break
+            for paper in self._search(candidate, max_results=fetch_n):
+                if paper.id and (
+                    paper.id not in merged or paper.score > merged[paper.id].score
+                ):
+                    merged[paper.id] = paper
+        papers = sorted(merged.values(), key=lambda p: p.score, reverse=True)[:max_results]
+        used_query = " · ".join(candidates)
 
         if not papers:
             return NtrsAnswer(
